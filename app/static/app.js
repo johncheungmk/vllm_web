@@ -46,8 +46,11 @@ const tooltipText = {
   'export-systemd': 'Generate an example systemd service for this profile.',
   'export-ray': 'Generate a Ray cluster launch script for this profile.',
   'export-spark': 'Generate a Spark-managed Ray launch script. Expert Spark/Ray deployments only.',
-  'export-profile': 'Export the selected profile as JSON.',
+  'export-profile': 'Export only the selected profile as JSON.',
+  'export-all-profiles': 'Export every saved profile as JSON.',
   'import-profiles': 'Import profile JSON into vLLM Web.',
+  'copy-command': 'Copy the current command preview.',
+  'copy-wizard-command': 'Copy the wizard command preview.',
   'wizard-download-script': 'Download a start-vllm.sh script for the current wizard settings.',
   'wizard-start-server': 'Start vLLM directly from vLLM Web using the current wizard settings.',
   'send-test': 'Send a chat completion request to the active vLLM server.',
@@ -200,6 +203,7 @@ function showValidation(report = {}) {
   if (!warnings.length && !errors.length && !messages.length) {
     box.hidden = true;
     box.innerHTML = '';
+    setConfigStatus('valid');
     return;
   }
   box.hidden = false;
@@ -208,6 +212,7 @@ function showValidation(report = {}) {
   const warningHtml = warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('');
   const messageHtml = messages.map(m => `<li>${escapeHtml(m)}</li>`).join('');
   box.innerHTML = `${errors.length ? `<strong>Errors</strong><ul>${errorHtml}</ul>` : ''}${warnings.length ? `<strong>Warnings</strong><ul>${warningHtml}</ul>` : ''}${messages.length ? `<strong>Messages</strong><ul>${messageHtml}</ul>` : ''}`;
+  setConfigStatus(errors.length ? 'invalid' : (warnings.length ? 'warning' : 'valid'));
 }
 
 function readElementValue(el) {
@@ -273,6 +278,7 @@ function syncGenerationConfig() {
 function applyMode() {
   const mode = $('ui-mode').value || 'wizard';
   document.body.dataset.mode = mode;
+  updateSummary();
   syncExpertOptions(mode);
   if (mode === 'expert') {
     const activeTab = document.querySelector('.tab.active')?.dataset.tab || 'basic';
@@ -342,22 +348,39 @@ function updateWizardReview() {
   $('wizard-script-box').textContent = 'Click Download startup script to export the shell script.';
 }
 
+function setConfigStatus(state) {
+  const el = $('config-status');
+  if (!el) return;
+  const labels = {valid: 'Valid', warning: 'Review warnings', invalid: 'Invalid', checking: 'Checking'};
+  el.textContent = labels[state] || labels.checking;
+  el.className = `config-status ${state || 'checking'}`;
+}
+
+function updateSummary(profile = getFormProfile()) {
+  if (!$('summary-mode')) return;
+  $('summary-mode').textContent = ($('ui-mode').value || 'wizard') === 'expert' ? 'Expert' : 'Wizard';
+  $('summary-endpoint').textContent = `${profile.host || 'HOST'}:${profile.port || 'PORT'}`;
+  $('summary-parallel').textContent = `TP ${profile.tensor_parallel_size || 1} / PP ${profile.pipeline_parallel_size || 1}`;
+  $('summary-speculative').textContent = profile.speculative_method || 'Off';
+}
+
 function syncSpeculativeFields() {
   const method = readElementValue($('speculative-method'));
   document.querySelectorAll('.spec-field').forEach(el => { el.hidden = !method; });
   document.querySelectorAll('.spec-ngram').forEach(el => { el.hidden = !['ngram', 'ngram_gpu'].includes(method); });
-  const needsModel = ['draft_model', 'eagle', 'eagle3', 'custom_class'].includes(method);
-  document.querySelectorAll('.spec-model').forEach(el => { el.hidden = !needsModel && !['mtp', 'mlp_speculator'].includes(method); });
+  const modelUseful = ['draft_model', 'eagle', 'eagle3', 'custom_class', 'mtp', 'mlp_speculator', 'dflash'].includes(method) || method.endsWith('_mtp');
+  document.querySelectorAll('.spec-model').forEach(el => { el.hidden = !modelUseful; });
   document.querySelectorAll('.spec-draft-tp').forEach(el => { el.hidden = !['draft_model', 'eagle', 'eagle3'].includes(method); });
   const help = {
     '': 'Speculative decoding is disabled.',
     draft_model: 'Draft-model speculative decoding needs a smaller compatible auxiliary model.',
-    eagle: 'EAGLE normally needs a compatible speculator model/head, not just the target model.',
-    eagle3: 'EAGLE3 normally needs a compatible speculator model/head, not just the target model.',
+    eagle: 'EAGLE often uses a compatible speculator model/head. Leave the model blank only for model-native or extra JSON configurations your vLLM version supports.',
+    eagle3: 'EAGLE3 often uses a compatible speculator model/head. Leave the model blank only for model-native or extra JSON configurations your vLLM version supports.',
     ngram: 'N-gram is easy to enable and does not need a separate draft model.',
     ngram_gpu: 'GPU n-gram does not need a separate draft model.',
     suffix: 'Suffix decoding does not need a separate draft model.',
     mtp: 'Use MTP when the target model or checkpoint supports MTP-style speculative decoding.',
+    dflash: 'Use DFlash only with compatible target models and vLLM versions.',
     custom_class: 'Custom proposer classes are experimental and require a class path in the model field.'
   };
   $('speculative-help').textContent = help[method] || 'Confirm this speculative method is supported by your installed vLLM version.';
@@ -417,8 +440,11 @@ async function saveProfile() {
 
 async function updateCommandPreview() {
   const errors = clientValidationErrors();
+  updateSummary();
   if (errors.length) {
     $('command-box').textContent = 'Fix validation errors to preview the command.';
+    $('command-meta').textContent = 'Preview paused';
+    setConfigStatus('invalid');
     showValidation({errors});
     return;
   }
@@ -426,12 +452,15 @@ async function updateCommandPreview() {
   try {
     const body = await api('/api/profiles/command', {method: 'POST', body: JSON.stringify({profile})});
     $('command-box').textContent = body.shell || 'Fix validation errors to preview the command.';
+    $('command-meta').textContent = body.ok ? `${(body.cmd || []).length} argv item(s), generated safely without shell execution` : 'Preview unavailable';
     $('speculative-json-box').textContent = body.speculative_json ? JSON.stringify(body.speculative_json, null, 2) : '';
     showValidation(body);
     await updateRunbook(profile);
     if ($('tab-review')?.classList.contains('active')) updateWizardReview();
   } catch (e) {
     $('command-box').textContent = 'Fix validation errors to preview the command.';
+    $('command-meta').textContent = 'Preview unavailable';
+    setConfigStatus('invalid');
     $('speculative-json-box').textContent = '';
     setMessage(e.message);
   }
@@ -464,6 +493,8 @@ async function updateRunbook(profile = getFormProfile()) {
 
 function schedulePreview() {
   markDirty(true);
+  updateSummary();
+  setConfigStatus('checking');
   clearTimeout(previewTimer);
   previewTimer = setTimeout(updateCommandPreview, 250);
 }
@@ -583,8 +614,8 @@ async function runAction(action) {
   }
 }
 
-async function copyCommand() {
-  const text = $('command-box').textContent || '';
+async function copyCommand(sourceId = 'command-box') {
+  const text = $(sourceId).textContent || '';
   if (!text.trim()) return;
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
@@ -759,6 +790,9 @@ function bind() {
     setActivePage(btn.dataset.wizardTab);
   })));
   $('export-profile').addEventListener('click', () => runAction(() => exportProfiles('current')));
+  $('export-all-profiles').addEventListener('click', () => runAction(() => exportProfiles('all')));
+  $('copy-command').addEventListener('click', () => runAction(() => copyCommand('command-box')));
+  $('copy-wizard-command').addEventListener('click', () => runAction(() => copyCommand('wizard-command-box')));
   $('import-profile-file').addEventListener('change', async (e) => {
     await runAction(async () => { await importProfiles(e.target.files[0]); e.target.value = ''; });
   });

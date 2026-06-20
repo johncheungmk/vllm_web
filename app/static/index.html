@@ -7,18 +7,23 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header>
+  <header class="app-header">
     <div>
       <h1>vLLM Web</h1>
-      <p>Create, validate, and launch vLLM serve profiles.</p>
+      <p>Configure, validate, and launch reproducible vLLM serve profiles.</p>
     </div>
     <div class="status-pill" id="server-status">vLLM server: checking...</div>
   </header>
 
   <main>
     <section class="panel sidebar">
-      <h2>Profiles</h2>
-      <span id="dirty-badge" class="dirty-badge" hidden>Unsaved changes</span>
+      <div class="section-heading">
+        <div>
+          <h2>Profiles</h2>
+          <p>Saved launch configurations</p>
+        </div>
+        <span id="dirty-badge" class="dirty-badge" hidden>Unsaved</span>
+      </div>
       <select id="profile-select"></select>
       <div class="button-row">
         <button id="new-profile">New</button>
@@ -45,19 +50,43 @@
           <button id="export-spark" class="expert-only">Spark/Ray script</button>
         </div>
         <div class="button-row">
-          <button id="export-profile" title="Exports only the current profile as JSON.">Export Profile</button>
+          <button id="export-profile" title="Exports only the current profile as JSON.">Export current</button>
+          <button id="export-all-profiles" title="Exports every saved profile as JSON.">Export all</button>
           <button id="import-profiles">Import Profile</button>
           <input id="import-profile-file" type="file" accept="application/json,.json" hidden />
         </div>
       </details>
       <div id="validation-box" class="notice warning" hidden></div>
-      <pre id="command-box" class="small-pre"></pre>
-      <h3>Speculative JSON</h3>
-      <pre id="speculative-json-box" class="small-pre"></pre>
+      <div class="preview-card">
+        <div class="preview-header">
+          <div>
+            <h3>Command preview</h3>
+            <p id="command-meta">Live preview from current form values</p>
+          </div>
+          <button id="copy-command" class="compact-button">Copy</button>
+        </div>
+        <pre id="command-box" class="small-pre command-pre"></pre>
+      </div>
+      <details class="tool-drawer" open>
+        <summary>Speculative JSON</summary>
+        <pre id="speculative-json-box" class="small-pre"></pre>
+      </details>
     </section>
 
     <section class="panel form-panel">
-      <h2>Launch configuration</h2>
+      <div class="section-heading">
+        <div>
+          <h2>Launch configuration</h2>
+          <p>Wizard mode keeps common settings visible. Expert mode reveals the full surface.</p>
+        </div>
+        <div id="config-status" class="config-status">Checking</div>
+      </div>
+      <div class="summary-strip">
+        <div><span>Mode</span><strong id="summary-mode">Wizard</strong></div>
+        <div><span>Endpoint</span><strong id="summary-endpoint">127.0.0.1:8000</strong></div>
+        <div><span>Parallelism</span><strong id="summary-parallel">TP 1 / PP 1</strong></div>
+        <div><span>Speculative</span><strong id="summary-speculative">Off</strong></div>
+      </div>
       <div class="mode-row">
         <label>Mode
           <select name="ui_mode" id="ui-mode">
@@ -99,6 +128,10 @@
 
       <form id="profile-form">
         <div class="tab-page active" id="tab-basic">
+          <div class="tab-intro">
+            <h3>Basic serving</h3>
+            <p>Start here: model identity, API endpoint, and the safest common runtime choices.</p>
+          </div>
           <div class="grid">
             <label>Profile name<input name="name" /></label>
             <label>Model path or Hugging Face ID<input name="model" placeholder="Qwen/Qwen3-8B" /></label>
@@ -185,6 +218,10 @@
         </div>
 
         <div class="tab-page" id="tab-performance">
+          <div class="tab-intro">
+            <h3>Performance and memory</h3>
+            <p>Tune batching, context length, KV cache memory, and latency-throughput behavior.</p>
+          </div>
           <div class="grid">
             <label>GPU memory utilization <span class="field-help">Controls how much GPU memory vLLM pre-allocates for KV cache.</span><input name="gpu_memory_utilization" type="number" step="0.01" min="0.01" max="1" /></label>
             <label>Max model length<input name="max_model_len" type="number" min="1" step="1" /></label>
@@ -234,6 +271,10 @@
         </div>
 
         <div class="tab-page" id="tab-parallel">
+          <div class="tab-intro">
+            <h3>Distributed deployment</h3>
+            <p>Use tensor parallel for single-node multi-GPU. Use Ray for multi-node tensor or pipeline parallel. Data parallel emits per-node commands when needed.</p>
+          </div>
           <div class="grid">
             <label>Deployment mode
               <select name="deployment_mode">
@@ -293,6 +334,10 @@
         </div>
 
         <div class="tab-page" id="tab-speculative">
+          <div class="tab-intro">
+            <h3>Speculative decoding</h3>
+            <p>Lightweight methods like n-gram and suffix do not need a draft model. Model-based methods require compatible model support.</p>
+          </div>
           <div class="grid">
             <label>Method
               <select name="speculative_method" id="speculative-method" data-option-key="speculative_method" data-custom-input="speculative-method-custom">
@@ -315,6 +360,10 @@
         </div>
 
         <div class="tab-page" id="tab-advanced">
+          <div class="tab-intro">
+            <h3>Expert overrides</h3>
+            <p>Use this area for environment variables, JSON config objects, and newly released vLLM flags.</p>
+          </div>
           <div class="grid">
             <label>CUDA_VISIBLE_DEVICES<input name="cuda_visible_devices" placeholder="0,1,2,3" /></label>
             <label data-flag="--task">Compatibility task
@@ -341,7 +390,11 @@
           <h3>Review and launch</h3>
           <div id="wizard-summary" class="review-grid"></div>
           <h3>Command preview</h3>
-          <pre id="wizard-command-box" class="small-pre"></pre>
+          <div class="preview-header inline-preview">
+            <p>Generated from the current wizard settings</p>
+            <button id="copy-wizard-command" type="button" class="compact-button">Copy</button>
+          </div>
+          <pre id="wizard-command-box" class="small-pre command-pre"></pre>
           <h3>Startup script</h3>
           <pre id="wizard-script-box" class="small-pre" tabindex="0">Click Download startup script to export the shell script.</pre>
           <div class="button-row">

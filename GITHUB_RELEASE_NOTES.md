@@ -1,27 +1,8 @@
 # vLLM Web - GitHub Upload Notes
 
-
-## Repository
-
-```bash
-git clone https://github.com/johncheungmk/vllm_web
-cd vllm_web
-```
-
-For first upload from this package:
-
-```bash
-git init
-git remote add origin https://github.com/johncheungmk/vllm_web
-git branch -M main
-git add .
-git commit -m "Initial vLLM Web package"
-git push -u origin main
-```
-
 ## What to Upload
 
-Upload this repository as `johncheungmk/vllm_web`, excluding files ignored by `.gitignore`.
+Upload this repository as-is, excluding files ignored by `.gitignore`.
 
 Important included files:
 

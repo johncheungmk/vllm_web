@@ -57,7 +57,7 @@ VALID_LOAD_FORMATS = {
     "auto", "pt", "safetensors", "npcache", "dummy", "tensorizer", "bitsandbytes",
     "sharded_state", "gguf", "mistral", "runai_streamer", "fastsafetensors",
 }
-VALID_GENERATION_CONFIGS = {"", "auto", "vllm"}
+VALID_GENERATION_CONFIGS = {"", "auto", "vllm", "custom"}
 VALID_GUIDED_DECODING_BACKENDS = {"", "auto", "xgrammar", "outlines", "guidance"}
 VALID_TOKENIZER_MODES = {"auto", "slow", "mistral", "custom"}
 VALID_KV_CACHE_DTYPES = {
@@ -73,7 +73,11 @@ VALID_KV_OFFLOADING_BACKENDS = {"", "native", "lmcache"}
 VALID_OFFLOAD_BACKENDS = {"", "auto", "prefetch", "uva"}
 VALID_SPEC_METHODS = {
     "", "draft_model", "ngram", "ngram_gpu", "eagle", "eagle3", "medusa", "suffix", "mtp",
-    "mlp_speculator", "custom_class",
+    "mlp_speculator", "custom_class", "deepseek_mtp", "dflash", "ernie_mtp", "exaone4_5_mtp",
+    "exaone_moe_mtp", "extract_hidden_states", "gemma4_mtp", "glm4_moe_lite_mtp",
+    "glm4_moe_mtp", "glm_ocr_mtp", "hy_v3_mtp", "longcat_flash_mtp", "mimo_mtp",
+    "mimo_v2_mtp", "nemotron_h_mtp", "pangu_ultra_moe_mtp", "qwen3_5_mtp",
+    "qwen3_next_mtp", "step3p5_mtp",
 }
 
 FALLBACK_CHOICES: Dict[str, List[str]] = {
@@ -95,7 +99,7 @@ FALLBACK_CHOICES: Dict[str, List[str]] = {
     "kv_offloading_backend": ["native", "lmcache"],
     "offload_backend": ["auto", "prefetch", "uva"],
     "distributed_executor_backend": ["", "mp", "ray", "external_launcher", "uni"],
-    "speculative_method": ["", "draft_model", "eagle", "eagle3", "mtp", "ngram", "ngram_gpu", "suffix", "medusa", "mlp_speculator", "custom_class"],
+    "speculative_method": ["", "draft_model", "eagle", "eagle3", "mtp", "ngram", "ngram_gpu", "suffix", "medusa", "mlp_speculator", "dflash", "custom_class"],
 }
 
 OPTION_TO_FLAG = {
@@ -158,7 +162,8 @@ class VllmOptionsRegistry:
                 existing = self.choices.get(field_name, [])
                 self.choices[field_name] = list(dict.fromkeys(existing + parsed))
         # Speculative method choices are often only documented in prose or JSON examples.
-        for method in re.findall(r"\b([a-zA-Z0-9_]+_mtp|ngram_gpu|mlp_speculator|draft_model|eagle3?|medusa|suffix|mtp)\b", self.help_text):
+        spec_pattern = r"\b([a-zA-Z0-9_]+_mtp|ngram_gpu|mlp_speculator|draft_model|eagle3?|medusa|suffix|mtp|dflash|extract_hidden_states|custom_class)\b"
+        for method in re.findall(spec_pattern, self.help_text):
             if method not in self.choices["speculative_method"]:
                 self.choices["speculative_method"].append(method)
 
@@ -474,6 +479,8 @@ def validation_report(p: VllmProfile) -> Dict[str, List[str]]:
         warnings.append("Tokenizer mode is not in the built-in list; confirm your vLLM version supports it.")
     if p.generation_config not in VALID_GENERATION_CONFIGS:
         warnings.append("Generation config is not in the built-in list; confirm your vLLM version supports it.")
+    if p.generation_config == "custom" and not p.generation_config_path.strip():
+        errors.append("Generation config custom path is required when Generation config is set to custom path.")
     if p.guided_decoding_backend not in VALID_GUIDED_DECODING_BACKENDS:
         warnings.append("Guided decoding backend is not in the built-in list; confirm your vLLM version supports it.")
     if p.kv_cache_dtype and p.kv_cache_dtype not in VALID_KV_CACHE_DTYPES:
@@ -556,15 +563,25 @@ def validation_report(p: VllmProfile) -> Dict[str, List[str]]:
         warnings.append("Set Ray head address or node IPs before exporting a multi-node script.")
     if p.ray_num_nodes and node_ips and len(node_ips) not in {p.ray_num_nodes, max(p.ray_num_nodes - 1, 0)}:
         warnings.append("Ray node count does not match the node IP list. Include all nodes, or workers only with a head node IP.")
+    if p.data_parallel_size and p.data_parallel_size > 1 and p.deployment_mode.startswith("data_parallel"):
+        if p.data_parallel_backend != "ray" and not (p.data_parallel_address or p.ray_head_address or node_ips):
+            warnings.append("Multi-node data parallel deployments need a data-parallel address or node IP list for per-node commands.")
+        if p.data_parallel_size_local is not None and p.data_parallel_size_local > p.data_parallel_size:
+            errors.append("Data parallel local size cannot exceed total data parallel size.")
     if p.deployment_mode == "data_parallel_external" and not p.is_moe_model:
         warnings.append("vLLM documents external data-parallel load balancing mainly for MoE deployments. For dense models, consider independent vLLM instances behind a normal load balancer.")
     if p.enable_expert_parallel and not p.is_moe_model:
         warnings.append("Expert parallelism is for MoE models only.")
     if p.speculative_method:
-        if p.speculative_method in {"draft_model", "eagle", "eagle3"} and not p.speculative_model:
-            errors.append(f"{p.speculative_method} speculative decoding requires a compatible auxiliary/speculator model.")
+        if p.speculative_method == "draft_model" and not p.speculative_model:
+            errors.append("draft_model speculative decoding requires a compatible auxiliary model.")
         if p.speculative_method in {"eagle", "eagle3"}:
-            warnings.append("EAGLE/EAGLE3 normally needs a compatible speculator model/head, not just the target model.")
+            if p.speculative_model:
+                warnings.append("EAGLE/EAGLE3 needs a compatible speculator model/head for the target model.")
+            else:
+                warnings.append("EAGLE/EAGLE3 often uses a compatible speculator model/head; leaving it blank lets vLLM rely on model-native or extra speculative config support when available.")
+        if p.speculative_method in {"mtp", "mlp_speculator"} or p.speculative_method.endswith("_mtp"):
+            warnings.append("MTP/MLP speculative methods require target-model or checkpoint support. Confirm your model family supports this mode.")
         if p.speculative_method == "custom_class" and not p.speculative_model:
             errors.append("custom_class speculative decoding requires a proposer class path in the model field.")
         if p.speculative_method == "custom_class":
@@ -851,7 +868,7 @@ def export_ray_script(p: VllmProfile) -> str:
     head = ray_head(p)
     port = p.ray_port
     nodes = parse_node_ips(p.ray_node_ips)
-    workers = nodes[1:] if nodes else ["WORKER_IP_1", "WORKER_IP_2"]
+    workers = worker_ips_for_runbook(p) or ["WORKER_IP_1", "WORKER_IP_2"]
     node_list = " ".join(shlex.quote(node) for node in nodes) if nodes else "HEAD_IP WORKER_IP_1 WORKER_IP_2"
     min_nodes = p.ray_min_nodes or p.ray_num_nodes or max(len(nodes), 1)
     gpus_per_node = p.ray_gpus_per_node if p.ray_gpus_per_node is not None else p.tensor_parallel_size
@@ -960,6 +977,55 @@ def worker_ips_for_runbook(p: VllmProfile) -> List[str]:
     return ips
 
 
+def data_parallel_node_commands(p: VllmProfile) -> List[str]:
+    if not p.data_parallel_size or p.data_parallel_size <= 1:
+        return []
+    if p.data_parallel_backend == "ray":
+        return [
+            "# Ray data-parallel backend starts local and remote DP ranks from one vLLM command.",
+            command_for_shell(build_command(p)),
+        ]
+
+    head = p.data_parallel_address or ray_head(p)
+    workers = worker_ips_for_runbook(p)
+    node_names = [head] + workers
+    if len(node_names) == 1 and p.ray_num_nodes and p.ray_num_nodes > 1:
+        node_names.extend(f"WORKER_IP_{idx}" for idx in range(1, p.ray_num_nodes))
+    if len(node_names) == 1:
+        return [command_for_shell(build_command(p))]
+
+    port = p.data_parallel_rpc_port or 13345
+    total = p.data_parallel_size
+    commands: List[str] = []
+    start_rank = p.data_parallel_start_rank or 0
+
+    for index, node in enumerate(node_names):
+        remaining = total - start_rank
+        if remaining <= 0:
+            break
+        remaining_nodes = len(node_names) - index
+        if index == 0 and p.data_parallel_size_local is not None:
+            local_size = min(p.data_parallel_size_local, remaining)
+        else:
+            local_size = max(1, (remaining + remaining_nodes - 1) // remaining_nodes)
+            local_size = min(local_size, remaining)
+        node_profile = VllmProfile(**p.model_dump())
+        node_profile.data_parallel_address = head
+        node_profile.data_parallel_rpc_port = port
+        node_profile.data_parallel_start_rank = start_rank if index > 0 else p.data_parallel_start_rank
+        node_profile.data_parallel_size_local = local_size
+        node_profile.data_parallel_rank = None
+        node_profile.headless = index > 0
+        node_profile.host = p.host if index == 0 else "127.0.0.1"
+        commands.append(f"# Node {index} ({node})")
+        commands.append(command_for_shell(build_command(node_profile)))
+        start_rank += local_size
+
+    if start_rank < total:
+        commands.append(f"# Add more nodes or increase data_parallel_size_local; only {start_rank} of {total} DP ranks were assigned.")
+    return commands
+
+
 def cluster_runbook(p: VllmProfile) -> Dict[str, Any]:
     report = validation_report(p)
     head = ray_head(p)
@@ -982,6 +1048,7 @@ def cluster_runbook(p: VllmProfile) -> Dict[str, Any]:
         serve_profile.enable_ep_weight_filter = True
 
     serve_cmd = command_for_shell(build_command(serve_profile))
+    dp_node_cmds = data_parallel_node_commands(serve_profile)
     worker_cmds = [
         f"ssh {shlex.quote(worker)} 'export VLLM_HOST_IP={shlex.quote(worker)}; ray start --address={shlex.quote(head)}:{p.ray_port}'"
         for worker in workers
@@ -1005,10 +1072,11 @@ def cluster_runbook(p: VllmProfile) -> Dict[str, Any]:
             ] if p.deployment_mode in {"ray_cluster", "ray_symmetric_run", "expert_parallel_moe"} else ["# Run vLLM locally on this host."],
             "B. Worker node commands": worker_cmds if p.deployment_mode in {"ray_cluster", "ray_symmetric_run", "expert_parallel_moe"} else ["# No worker nodes required for this mode."],
             "C. vLLM serve command": [serve_cmd],
-            "D. Optional load balancer commands": lb_cmds or ["# Not required for this profile."],
-            "E. Verification commands": ["ray status", "ray list nodes", "nvidia-smi", f"curl http://{p.host}:{p.port}/health"],
-            "F. Stop/cleanup commands": ["pkill -f 'vllm serve' || true", "ray stop --force"],
-            "G. Security notes": [
+            "D. Per-node data-parallel commands": dp_node_cmds or ["# Not required for this profile."],
+            "E. Optional load balancer commands": lb_cmds or ["# Not required for this profile."],
+            "F. Verification commands": ["ray status", "ray list nodes", "nvidia-smi", f"curl http://{p.host}:{p.port}/health"],
+            "G. Stop/cleanup commands": ["pkill -f 'vllm serve' || true", "ray stop --force"],
+            "H. Security notes": [
                 "Keep Ray and vLLM distributed traffic on a private trusted network.",
                 "Do not expose vLLM Web publicly.",
                 "Treat stored API keys, Hugging Face tokens, and profile exports as sensitive.",
@@ -1108,6 +1176,8 @@ def api_delete_profile(profile_id: str) -> Dict[str, Any]:
     if state.is_running() and state.profile_id == profile_id:
         raise HTTPException(status_code=409, detail="Stop the running server before deleting this profile")
     profiles = [p for p in load_profiles() if p.id != profile_id]
+    if not profiles:
+        profiles = [VllmProfile()]
     save_profiles(profiles)
     return {"ok": True}
 
