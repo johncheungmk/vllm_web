@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SERVICE=/etc/systemd/system/vllm-ui-dashboard.service
+SERVICE=/etc/systemd/system/vllm-web.service
 sudo tee "$SERVICE" > /dev/null <<EOF
 [Unit]
 Description=vLLM Web
@@ -20,5 +20,5 @@ Environment=VLLM_UI_DATA=$APP_DIR/data
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
-sudo systemctl enable --now vllm-ui-dashboard
-systemctl status vllm-ui-dashboard --no-pager
+sudo systemctl enable --now vllm-web
+systemctl status vllm-web --no-pager

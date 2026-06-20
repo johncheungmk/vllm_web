@@ -4,11 +4,13 @@ A small local web app for configuring and launching `vllm serve` profiles withou
 
 It is designed for an admin workstation or an inference server, not for public Internet exposure. It can start and stop local processes and may store secrets in `data/profiles.json`.
 
+Repository: `https://github.com/johncheungmk/vllm_web`
+
 ## Quick start
 
 ```bash
-git clone <your-repo-url>
-cd vllm-ui-dashboard
+git clone https://github.com/johncheungmk/vllm_web
+cd vllm_web
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
@@ -64,7 +66,7 @@ Blank optional text fields are stored as empty strings. This keeps profile impor
 Use the same Python environment where `vllm` works, or activate that environment before starting vLLM Web.
 
 ```bash
-cd vllm-ui-dashboard
+cd vllm_web
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
@@ -295,9 +297,11 @@ Use MTP methods when the target model or checkpoint supports MTP-style speculati
 
 ## Use with Codex
 
-From the folder where you want the project:
+Clone the repository, enter the project folder, then start Codex:
 
 ```bash
+git clone https://github.com/johncheungmk/vllm_web
+cd vllm_web
 codex
 ```
 
@@ -335,6 +339,26 @@ Requirements:
 - For public model API traffic, put Nginx/Caddy/Traefik in front for TLS, auth, rate limits, logging, and access control.
 - Keep imported/exported profile JSON in a secure location; it can contain API keys and environment variables.
 - Review warnings in the UI before starting a profile, especially public bind addresses, Ray topology mismatches, and `trust_remote_code`.
+
+## GitHub repository
+
+Main repository:
+
+```bash
+git clone https://github.com/johncheungmk/vllm_web
+cd vllm_web
+```
+
+For an existing local folder that was created from the ZIP package, set the remote with:
+
+```bash
+git init
+git remote add origin https://github.com/johncheungmk/vllm_web
+git branch -M main
+git add .
+git commit -m "Initial vLLM Web package"
+git push -u origin main
+```
 
 ## Files
 
