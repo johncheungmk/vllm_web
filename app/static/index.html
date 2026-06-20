@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>vLLM Web</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>vLLM Web</h1>
+      <p>Create, validate, and launch vLLM serve profiles.</p>
+    </div>
+    <div class="status-pill" id="server-status">vLLM server: checking...</div>
+  </header>
+
+  <main>
+    <section class="panel sidebar">
+      <h2>Profiles</h2>
+      <span id="dirty-badge" class="dirty-badge" hidden>Unsaved changes</span>
+      <select id="profile-select"></select>
+      <div class="button-row">
+        <button id="new-profile">New</button>
+        <button id="clone-profile">Clone</button>
+        <button id="delete-profile" class="danger">Delete</button>
+      </div>
+      <div class="button-row">
+        <button id="save-profile" class="primary">Save Profile</button>
+      </div>
+      <div class="control-group">
+        <h3>vLLM server</h3>
+        <div class="button-row">
+          <button id="start-server" class="primary">Start</button>
+          <button id="restart-server">Restart</button>
+          <button id="stop-server" class="danger">Stop</button>
+        </div>
+      </div>
+      <details class="tool-drawer">
+        <summary>Scripts and profile tools</summary>
+        <div class="button-row">
+          <button id="export-startup-script">Start script</button>
+          <button id="export-systemd">Systemd</button>
+          <button id="export-ray">Ray script</button>
+          <button id="export-spark" class="expert-only">Spark/Ray script</button>
+        </div>
+        <div class="button-row">
+          <button id="export-profile" title="Exports only the current profile as JSON.">Export Profile</button>
+          <button id="import-profiles">Import Profile</button>
+          <input id="import-profile-file" type="file" accept="application/json,.json" hidden />
+        </div>
+      </details>
+      <div id="validation-box" class="notice warning" hidden></div>
+      <pre id="command-box" class="small-pre"></pre>
+      <h3>Speculative JSON</h3>
+      <pre id="speculative-json-box" class="small-pre"></pre>
+    </section>
+
+    <section class="panel form-panel">
+      <h2>Launch configuration</h2>
+      <div class="mode-row">
+        <label>Mode
+          <select name="ui_mode" id="ui-mode">
+            <option value="wizard">Wizard mode</option>
+            <option value="expert">Expert mode</option>
+          </select>
+        </label>
+        <label>Preset
+          <select id="preset-select">
+            <option value="">Choose preset...</option>
+            <option value="single_gpu">Single GPU</option>
+            <option value="single_node_multi_gpu">Single node multi-GPU</option>
+            <option value="ray_multi_node">Ray multi-node</option>
+            <option value="moe_expert_parallel">MoE expert parallel</option>
+            <option value="low_latency_spec">Low latency speculative decoding</option>
+            <option value="high_throughput">High throughput serving</option>
+            <option value="memory_saving">Memory saving serving</option>
+          </select>
+        </label>
+      </div>
+      <div id="vllm-info" class="hint"></div>
+      <div class="wizard-controls" id="wizard-controls">
+        <div class="wizard-steps" aria-label="Wizard steps">
+          <button class="wizard-step active" data-wizard-tab="basic">1. Basic</button>
+          <button class="wizard-step" data-wizard-tab="performance">2. Performance</button>
+          <button class="wizard-step" data-wizard-tab="parallel">3. Distributed</button>
+          <button class="wizard-step" data-wizard-tab="speculative">4. Speculative</button>
+          <button class="wizard-step" data-wizard-tab="review">5. Review</button>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="basic">Basic</button>
+        <button class="tab" data-tab="performance">Performance</button>
+        <button class="tab" data-tab="parallel">Distributed</button>
+        <button class="tab" data-tab="speculative">Speculative decoding</button>
+        <button class="tab" data-tab="advanced">Advanced</button>
+        <button class="tab" data-tab="test">Runtime</button>
+      </div>
+
+      <form id="profile-form">
+        <div class="tab-page active" id="tab-basic">
+          <div class="grid">
+            <label>Profile name<input name="name" /></label>
+            <label>Model path or Hugging Face ID<input name="model" placeholder="Qwen/Qwen3-8B" /></label>
+            <label>Served model name<input name="served_model_name" placeholder="Optional alias" /></label>
+            <label>Host<input name="host" /></label>
+            <label>Port<input name="port" type="number" min="1" max="65535" step="1" /></label>
+            <label>API key<input name="api_key" placeholder="Optional bearer token" /></label>
+            <label>dtype
+              <select name="dtype" data-option-key="dtype">
+                <option value="auto">auto</option>
+                <option value="half">half</option>
+                <option value="float16">float16</option>
+                <option value="bfloat16">bfloat16</option>
+                <option value="float">float</option>
+                <option value="float32">float32</option>
+              </select>
+            </label>
+            <label>Quantization
+              <select name="quantization" data-option-key="quantization" data-custom-input="quantization-custom">
+                <option value="">none</option>
+                <option value="awq">awq</option><option value="gptq">gptq</option><option value="squeezellm">squeezellm</option>
+                <option value="bitsandbytes">bitsandbytes</option><option value="fp8">fp8</option><option value="compressed-tensors">compressed-tensors</option>
+                <option value="gguf">gguf</option><option value="marlin">marlin</option><option value="awq_marlin">awq_marlin</option>
+                <option value="gptq_marlin">gptq_marlin</option><option value="experts_int8">experts_int8</option><option value="modelopt">modelopt</option>
+                <option value="nvfp4">nvfp4</option><option value="tpu_int8">tpu_int8</option><option value="inc">inc</option><option value="fbgemm_fp8">fbgemm_fp8</option>
+                <option value="__custom__">custom...</option>
+              </select>
+              <input id="quantization-custom" class="custom-value" placeholder="Custom quantization value" hidden disabled />
+            </label>
+            <label class="wizard-extra">Runner <span class="field-help">Controls the model runner type.</span>
+              <select name="runner" data-option-key="runner" data-custom-input="runner-custom">
+                <option value="auto">auto</option><option value="generate">generate</option><option value="pooling">pooling</option><option value="draft">draft</option><option value="__custom__">custom...</option>
+              </select>
+              <input id="runner-custom" class="custom-value" placeholder="Custom runner value" hidden disabled />
+            </label>
+            <label class="wizard-extra">Convert <span class="field-help">Adapts a generation model for pooling tasks where supported.</span>
+              <select name="convert" data-option-key="convert" data-custom-input="convert-custom">
+                <option value="auto">auto</option><option value="none">none</option><option value="embed">embed</option><option value="classify">classify</option><option value="__custom__">custom...</option>
+              </select>
+              <input id="convert-custom" class="custom-value" placeholder="Custom convert value" hidden disabled />
+            </label>
+            <label class="wizard-extra">Load format
+              <select name="load_format" data-option-key="load_format" data-custom-input="load-format-custom">
+                <option value="auto">auto</option><option value="pt">pt</option><option value="safetensors">safetensors</option>
+                <option value="npcache">npcache</option><option value="dummy">dummy</option><option value="tensorizer">tensorizer</option>
+                <option value="bitsandbytes">bitsandbytes</option><option value="sharded_state">sharded_state</option><option value="gguf">gguf</option>
+                <option value="mistral">mistral</option><option value="runai_streamer">runai_streamer</option><option value="fastsafetensors">fastsafetensors</option>
+                <option value="__custom__">custom...</option>
+              </select>
+              <input id="load-format-custom" class="custom-value" placeholder="Custom load format" hidden disabled />
+            </label>
+            <label class="wizard-extra">Tokenizer mode
+              <select name="tokenizer_mode" data-option-key="tokenizer_mode" data-custom-input="tokenizer-mode-custom">
+                <option value="auto">auto</option><option value="slow">slow</option><option value="mistral">mistral</option><option value="custom">custom</option><option value="__custom__">custom...</option>
+              </select>
+              <input id="tokenizer-mode-custom" class="custom-value" placeholder="Custom tokenizer mode" hidden disabled />
+            </label>
+            <label class="wizard-extra">Download dir<input name="download_dir" placeholder="Optional model cache path" /></label>
+            <label class="wizard-extra">Root path<input name="root_path" placeholder="For reverse proxy path prefix" /></label>
+            <label class="wizard-extra">Uvicorn log level
+              <select name="uvicorn_log_level" data-option-key="uvicorn_log_level">
+                <option value="critical">critical</option><option value="error">error</option><option value="warning">warning</option>
+                <option value="info">info</option><option value="debug">debug</option><option value="trace">trace</option>
+              </select>
+            </label>
+            <label>Generation config
+              <select name="generation_config" id="generation-config" data-option-key="generation_config">
+                <option value="">default</option><option value="auto">auto</option><option value="vllm">vllm</option><option value="custom">custom path</option>
+              </select>
+              <input name="generation_config_path" id="generation-config-path" class="custom-value" placeholder="/path/to/generation_config.json" hidden />
+            </label>
+            <label class="wizard-extra" data-flag="--guided-decoding-backend">Guided decoding backend
+              <select name="guided_decoding_backend" data-option-key="guided_decoding_backend" data-custom-input="guided-decoding-custom">
+                <option value="">default</option><option value="auto">auto</option><option value="xgrammar">xgrammar</option>
+                <option value="outlines">outlines</option><option value="guidance">guidance</option><option value="__custom__">custom...</option>
+              </select>
+              <input id="guided-decoding-custom" class="custom-value" placeholder="Custom guided backend" hidden disabled />
+            </label>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" name="trust_remote_code" /> trust remote code</label>
+            <label><input type="checkbox" name="disable_log_stats" /> disable log stats</label>
+          </div>
+        </div>
+
+        <div class="tab-page" id="tab-performance">
+          <div class="grid">
+            <label>GPU memory utilization <span class="field-help">Controls how much GPU memory vLLM pre-allocates for KV cache.</span><input name="gpu_memory_utilization" type="number" step="0.01" min="0.01" max="1" /></label>
+            <label>Max model length<input name="max_model_len" type="number" min="1" step="1" /></label>
+            <label>Max num seqs <span class="field-help">Affects concurrency.</span><input name="max_num_seqs" type="number" min="1" step="1" /></label>
+            <label>Max num batched tokens <span class="field-help">Affects batching and memory.</span><input name="max_num_batched_tokens" type="number" min="1" step="1" /></label>
+            <label>KV cache dtype <span class="field-help">Can reduce KV cache memory but may affect quality or compatibility.</span>
+              <select name="kv_cache_dtype" data-option-key="kv_cache_dtype" data-custom-input="kv-cache-dtype-custom">
+                <option value="">default</option><option value="auto">auto</option><option value="bfloat16">bfloat16</option><option value="float16">float16</option>
+                <option value="fp8">fp8</option><option value="fp8_e4m3">fp8_e4m3</option><option value="fp8_e5m2">fp8_e5m2</option>
+                <option value="fp8_ds_mla">fp8_ds_mla</option><option value="fp8_inc">fp8_inc</option><option value="fp8_per_token_head">fp8_per_token_head</option>
+                <option value="int8_per_token_head">int8_per_token_head</option><option value="nvfp4">nvfp4</option>
+                <option value="turboquant_3bit_nc">turboquant_3bit_nc</option><option value="turboquant_4bit_nc">turboquant_4bit_nc</option>
+                <option value="turboquant_k3v4_nc">turboquant_k3v4_nc</option><option value="turboquant_k8v4">turboquant_k8v4</option><option value="__custom__">custom...</option>
+              </select>
+              <input id="kv-cache-dtype-custom" class="custom-value" placeholder="Custom KV cache dtype" hidden disabled />
+            </label>
+            <label class="wizard-extra">Prefix caching hash algorithm
+              <select name="prefix_caching_hash_algo" data-option-key="prefix_caching_hash_algo">
+                <option value="">default</option><option value="sha256">sha256</option><option value="sha256_cbor">sha256_cbor</option><option value="xxhash">xxhash</option><option value="xxhash_cbor">xxhash_cbor</option>
+              </select>
+            </label>
+            <label>Performance mode
+              <select name="performance_mode" data-option-key="performance_mode">
+                <option value="">default</option><option value="balanced">balanced</option><option value="interactivity">interactivity</option><option value="throughput">throughput</option>
+              </select>
+            </label>
+            <label class="wizard-extra">Swap space GB<input name="swap_space" type="number" step="0.1" min="0" /></label>
+            <label class="wizard-extra">CPU offload GB<input name="cpu_offload_gb" type="number" step="0.1" min="0" /></label>
+            <label class="expert-only" data-flag="--mamba-cache-dtype">Mamba cache dtype
+              <select name="mamba_cache_dtype" data-option-key="mamba_cache_dtype"><option value="">default</option><option value="auto">auto</option><option value="bfloat16">bfloat16</option><option value="float16">float16</option><option value="float32">float32</option></select>
+            </label>
+            <label class="expert-only" data-flag="--mamba-cache-mode">Mamba cache mode
+              <select name="mamba_cache_mode" data-option-key="mamba_cache_mode"><option value="">default</option><option value="none">none</option><option value="all">all</option><option value="align">align</option></select>
+            </label>
+            <label class="expert-only" data-flag="--kv-offloading-backend">KV offloading backend
+              <select name="kv_offloading_backend" data-option-key="kv_offloading_backend"><option value="">default</option><option value="native">native</option><option value="lmcache">lmcache</option></select>
+            </label>
+            <label class="expert-only" data-flag="--offload-backend">Offload backend
+              <select name="offload_backend" data-option-key="offload_backend"><option value="">default</option><option value="auto">auto</option><option value="prefetch">prefetch</option><option value="uva">uva</option></select>
+            </label>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" name="enable_prefix_caching" /> enable prefix caching</label>
+            <label><input type="checkbox" name="enable_chunked_prefill" /> enable chunked prefill</label>
+            <label><input type="checkbox" name="enforce_eager" /> enforce eager</label>
+          </div>
+        </div>
+
+        <div class="tab-page" id="tab-parallel">
+          <div class="grid">
+            <label>Deployment mode
+              <select name="deployment_mode">
+                <option value="local">Local single process</option>
+                <option value="single_node_multi_gpu">Single-node multi-GPU</option>
+                <option value="ray_cluster">Ray multi-node tensor/pipeline parallel</option>
+                <option value="data_parallel_internal" data-expert-option>Data-parallel internal load balancer</option>
+                <option value="data_parallel_external" data-expert-option>Data-parallel external load balancer</option>
+                <option value="data_parallel_hybrid" data-expert-option>Data-parallel hybrid load balancer</option>
+                <option value="expert_parallel_moe" data-expert-option>Expert parallel MoE</option>
+                <option value="spark_ray" data-expert-option>Spark-managed Ray launcher</option>
+              </select>
+            </label>
+            <label>Tensor parallel size<input name="tensor_parallel_size" type="number" min="1" /></label>
+            <label>Pipeline parallel size<input name="pipeline_parallel_size" type="number" min="1" /></label>
+            <label>Distributed executor backend
+              <select name="distributed_executor_backend">
+                <option value="">auto</option><option value="mp">mp</option><option value="ray">ray</option>
+                <option value="external_launcher">external_launcher</option><option value="uni">uni</option>
+              </select>
+            </label>
+            <label class="expert-only">Data parallel size<input name="data_parallel_size" type="number" min="1" /></label>
+            <label class="expert-only">Data parallel local size<input name="data_parallel_size_local" type="number" min="0" /></label>
+            <label class="expert-only">Data parallel start rank<input name="data_parallel_start_rank" type="number" min="0" /></label>
+            <label class="expert-only">Data parallel address<input name="data_parallel_address" placeholder="Head node IP" /></label>
+            <label class="expert-only">Data parallel RPC port<input name="data_parallel_rpc_port" type="number" min="1" max="65535" step="1" /></label>
+            <label class="expert-only">Data parallel backend<input name="data_parallel_backend" placeholder="ray, etc." /></label>
+            <label class="expert-only">Data parallel rank<input name="data_parallel_rank" type="number" min="0" /></label>
+            <label class="expert-only">API server count<input name="api_server_count" type="number" min="1" /></label>
+            <label>Ray head address<input name="ray_head_address" placeholder="10.0.0.10" /></label>
+            <label>Ray port<input name="ray_port" type="number" min="1" max="65535" step="1" /></label>
+            <label>Ray node count<input name="ray_num_nodes" type="number" min="1" /></label>
+            <label>Ray GPUs per node<input name="ray_gpus_per_node" type="number" min="0" /></label>
+            <label class="wizard-extra">Ray min nodes<input name="ray_min_nodes" type="number" min="1" /></label>
+            <label class="expert-only">Spark master URL<input name="spark_master_url" placeholder="spark://host:7077 or yarn" /></label>
+            <label class="expert-only">Spark app name<input name="spark_app_name" /></label>
+            <label class="expert-only">Spark executor instances<input name="spark_executor_instances" type="number" min="1" /></label>
+            <label class="expert-only">Spark executor cores<input name="spark_executor_cores" type="number" min="1" /></label>
+            <label class="expert-only">Spark executor GPUs<input name="spark_executor_gpus" type="number" min="0" /></label>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" name="data_parallel_hybrid_lb" /> data parallel hybrid load balancing</label>
+            <label><input type="checkbox" name="data_parallel_external_lb" /> data parallel external load balancing</label>
+            <label><input type="checkbox" name="data_parallel_multi_port_external_lb" /> multi-port external LB</label>
+            <label><input type="checkbox" name="headless" /> headless worker node</label>
+            <label><input type="checkbox" name="is_moe_model" /> model is MoE</label>
+            <label><input type="checkbox" name="external_load_balancer" /> external load balancer used</label>
+            <label><input type="checkbox" name="enable_expert_parallel" /> enable expert parallel</label>
+            <label><input type="checkbox" name="enable_ep_weight_filter" /> enable EP weight filter</label>
+          </div>
+          <label>Ray node IPs<textarea name="ray_node_ips" rows="4" placeholder="One IP per line. First IP is the head node." spellcheck="false"></textarea></label>
+          <label class="expert-only">Spark conf JSON<textarea name="spark_conf_json" rows="5" spellcheck="false">{}</textarea></label>
+          <label class="expert-only">Spark submit args<textarea name="spark_submit_args" rows="3" placeholder="--deploy-mode client" spellcheck="false"></textarea></label>
+          <p class="hint">For multi-node vLLM, use Ray and commonly set tensor parallel size to GPUs per node and pipeline parallel size to node count. Spark export is an expert-only launcher for Spark-managed allocation.</p>
+          <h3>Cluster Runbook</h3>
+          <pre id="runbook-box" class="log-box"></pre>
+        </div>
+
+        <div class="tab-page" id="tab-speculative">
+          <div class="grid">
+            <label>Method
+              <select name="speculative_method" id="speculative-method" data-option-key="speculative_method" data-custom-input="speculative-method-custom">
+                <option value="">none</option>
+                <option value="draft_model">draft_model</option><option value="ngram">ngram</option>
+                <option value="ngram_gpu">ngram_gpu</option><option value="eagle">eagle</option><option value="eagle3">eagle3</option>
+                <option value="medusa">medusa</option><option value="suffix">suffix</option><option value="mtp">mtp</option><option value="mlp_speculator">mlp_speculator</option><option value="custom_class">custom_class</option>
+                <option value="__custom__">custom...</option>
+              </select>
+              <input id="speculative-method-custom" class="custom-value" placeholder="Custom speculative method" hidden disabled />
+            </label>
+            <label class="spec-field spec-model">Draft / auxiliary model<input name="speculative_model" placeholder="Small draft model, EAGLE head, MTP checkpoint, or custom class path" /></label>
+            <label class="spec-field spec-token">Num speculative tokens<input name="num_speculative_tokens" type="number" min="1" /></label>
+            <label class="spec-field spec-draft-tp">Draft tensor parallel size<input name="draft_tensor_parallel_size" type="number" min="1" /></label>
+            <label class="spec-field spec-ngram">prompt_lookup_min<input name="prompt_lookup_min" type="number" min="1" /></label>
+            <label class="spec-field spec-ngram">prompt_lookup_max<input name="prompt_lookup_max" type="number" min="1" /></label>
+          </div>
+          <label class="spec-field spec-extra">Extra speculative JSON<textarea name="speculative_extra_json" rows="6" spellcheck="false">{}</textarea></label>
+          <p id="speculative-help" class="hint"></p>
+        </div>
+
+        <div class="tab-page" id="tab-advanced">
+          <div class="grid">
+            <label>CUDA_VISIBLE_DEVICES<input name="cuda_visible_devices" placeholder="0,1,2,3" /></label>
+            <label data-flag="--task">Compatibility task
+              <select name="task" data-option-key="task" data-custom-input="task-custom">
+                <option value="">omit</option><option value="auto">auto</option><option value="generate">generate</option><option value="embedding">embedding</option>
+                <option value="embed">embed</option><option value="classify">classify</option><option value="score">score</option><option value="reward">reward</option><option value="transcription">transcription</option><option value="__custom__">custom...</option>
+              </select>
+              <input id="task-custom" class="custom-value" placeholder="Custom task value" hidden disabled />
+            </label>
+          </div>
+          <label>Environment JSON<textarea name="env_json" rows="6" spellcheck="false">{}</textarea></label>
+          <label data-flag="--structured-outputs-config">Structured outputs config JSON<textarea name="structured_outputs_config" rows="5" spellcheck="false">{}</textarea></label>
+          <label data-flag="--compilation-config">Compilation config JSON<textarea name="compilation_config" rows="5" spellcheck="false">{}</textarea></label>
+          <label data-flag="--kv-transfer-config">KV transfer config JSON<textarea name="kv_transfer_config" rows="5" spellcheck="false">{}</textarea></label>
+          <label data-flag="--additional-config">Additional config JSON<textarea name="additional_config" rows="5" spellcheck="false">{}</textarea></label>
+          <label data-flag="--override-generation-config">Override generation config JSON<textarea name="override_generation_config" rows="5" spellcheck="false">{}</textarea></label>
+          <label>Advanced vLLM args<textarea name="advanced_args" rows="4" placeholder="--some-new-flag value" spellcheck="false"></textarea></label>
+          <p class="hint">Expert args may override or conflict with fields above.</p>
+          <label>Notes<textarea name="notes" rows="4"></textarea></label>
+          <p class="warning">Do not expose vLLM Web publicly. It can start local processes and may store secrets in the profile JSON.</p>
+        </div>
+
+        <div class="tab-page wizard-review" id="tab-review">
+          <h3>Review and launch</h3>
+          <div id="wizard-summary" class="review-grid"></div>
+          <h3>Command preview</h3>
+          <pre id="wizard-command-box" class="small-pre"></pre>
+          <h3>Startup script</h3>
+          <pre id="wizard-script-box" class="small-pre" tabindex="0">Click Download startup script to export the shell script.</pre>
+          <div class="button-row">
+            <button id="wizard-download-script" type="button">Download startup script</button>
+            <button id="wizard-start-server" type="button" class="primary">Start vLLM in this UI</button>
+          </div>
+        </div>
+      </form>
+
+      <div class="wizard-nav" id="wizard-nav">
+        <button id="wizard-prev" type="button">Back</button>
+        <button id="wizard-next" type="button" class="primary">Next</button>
+      </div>
+
+      <div class="tab-page" id="tab-test">
+        <div class="grid">
+          <label>Prompt<textarea id="test-prompt" rows="4">Write one sentence about vLLM.</textarea></label>
+          <label>Max tokens<input id="test-max-tokens" type="number" value="128" /></label>
+          <label>Temperature<input id="test-temperature" type="number" step="0.1" value="0.2" /></label>
+        </div>
+        <div class="button-row"><button id="send-test" class="primary">Send test request</button><button id="refresh-gpu">Refresh GPU</button></div>
+        <h3>GPU</h3><div id="gpu-box" class="telemetry-box"></div>
+        <h3>Response</h3><pre id="response-box" class="small-pre"></pre>
+        <h3>Logs</h3><pre id="log-box" class="log-box"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
